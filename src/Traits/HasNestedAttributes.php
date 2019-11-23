@@ -27,6 +27,13 @@ trait HasNestedAttributes
      */
     protected $destroyNestedKey = '_destroy';
 
+    /**
+     * Defined "pivot" key name
+     * To pass additional intermediate Many to Many table values with the IDs
+     *
+     * @var string
+     */
+    protected $pivotNestedKey = '_pivot';
 
     /**
      * Get accept nested attributes
@@ -121,13 +128,20 @@ trait HasNestedAttributes
                         if ($relation instanceof BelongsToMany) {
                             $idsNesteds = [];
                             foreach ($stack as $params) {
-                                $idsNesteds[] = $this->saveBelongsToManyNestedAttributes(
+                                $id = $this->saveBelongsToManyNestedAttributes(
                                     $this->$methodName()->getModel(),
                                     $params
                                 );
+
+                                if (!empty($params[$this->pivotNestedKey])) {
+                                    $idsNesteds[$id] = $params[$this->pivotNestedKey];
+                                } else {
+                                    $idsNesteds[] = $id;
+                                }
                             }
 
                             $this->$methodName()->sync($idsNesteds);
+
                         } else {
                             throw new InvalidArgumentException('The nested attribute relation is not supported for "' . $methodName . '".');
                         }
