@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 use Psr\Log\InvalidArgumentException;
 
 trait HasNestedAttributes
@@ -26,14 +27,6 @@ trait HasNestedAttributes
      * @var string
      */
     protected $destroyNestedKey = '_destroy';
-
-    /**
-     * Defined "pivot" key name
-     * To pass additional intermediate Many to Many table values with the IDs
-     *
-     * @var string
-     */
-    protected $pivotNestedKey = '_pivot';
 
     /**
      * Get accept nested attributes
@@ -106,21 +99,21 @@ trait HasNestedAttributes
                     }
                 } else {
                     if ($relation instanceof HasMany || $relation instanceof MorphMany) {
-                        $modelRelation = $this->$methodName();
-                        $relatedKeyName = $modelRelation->getRelated()->getKeyName();
-                        $idsArray = array_map(function ($stack) use ($relatedKeyName) {
-                            return isset($stack[$relatedKeyName]) ? $stack[$relatedKeyName] : false;
-                        }, $stack);
-                        $idsNotDelete = array_filter($idsArray);
-
-                        //Syncing one-to-many relationships
-                        if (count($idsNotDelete) > 0) {
-                            $modelRelation->whereNotIn($relatedKeyName, $idsNotDelete)->delete();
-                        } else {
-                            $modelRelation->delete();
-                        }
+//                        $modelRelation = $this->$methodName();
+//                        $relatedKeyName = $relation->getRelated()->getKeyName();
+//                        $idsArray = array_map(function ($stack) use ($relatedKeyName) {
+//                            return isset($stack[$relatedKeyName]) ? $stack[$relatedKeyName] : false;
+//                        }, $stack);
+//                        $idsNotDelete = array_filter($idsArray);
+//
+//                        //Syncing one-to-many relationships
+//                        if (count($idsNotDelete) > 0) {
+//                            $relation->whereNotIn($relatedKeyName, $idsNotDelete)->delete();
+//                        } else {
+//                            $relation->delete();
+//                        }
                         foreach ($stack as $params) {
-                            if (!$this->saveManyNestedAttributes($this->$methodName(), $params)) {
+                            if (!$this->saveManyNestedAttributes($relation, $params)) {
                                 return false;
                             }
                         }
@@ -128,19 +121,17 @@ trait HasNestedAttributes
                         if ($relation instanceof BelongsToMany) {
                             $idsNesteds = [];
                             foreach ($stack as $params) {
-                                $id = $this->saveBelongsToManyNestedAttributes(
-                                    $this->$methodName()->getModel(),
-                                    $params
-                                );
+                                $id = $this->saveBelongsToManyNestedAttributes($relation, $params);
 
-                                if (!empty($params[$this->pivotNestedKey])) {
-                                    $idsNesteds[$id] = $params[$this->pivotNestedKey];
+                                $pivotAccessor = $relation->getPivotAccessor();
+                                if (!empty($params[$pivotAccessor])) {
+                                    $idsNesteds[$id] = $params[$pivotAccessor];
                                 } else {
                                     $idsNesteds[] = $id;
                                 }
                             }
 
-                            $this->$methodName()->sync($idsNesteds);
+                            $relation->sync($idsNesteds);
 
                         } else {
                             throw new InvalidArgumentException('The nested attribute relation is not supported for "' . $methodName . '".');
@@ -185,7 +176,7 @@ trait HasNestedAttributes
     /**
      * Save the hasOne nested relation attributes to the database.
      *
-     * @param Illuminate\Database\Eloquent\Relations $relation
+     * @param HasOne|MorphOne $relation
      * @param array $params
      * @return bool
      */
@@ -208,7 +199,7 @@ trait HasNestedAttributes
     /**
      * Save the hasMany nested relation attributes to the database.
      *
-     * @param Illuminate\Database\Eloquent\Relations $relation
+     * @param HasMany|MorphMany $relation
      * @param array $params
      * @return bool
      */
@@ -216,7 +207,7 @@ trait HasNestedAttributes
     {
         $keyName = $relation->getModel()->getKeyName();
 
-        if (isset($params[$keyName]) && $this->exists) {
+        if ($this->exists && isset($params[$keyName])) {
             $model = $relation->findOrFail($params[$keyName]);
 
             if ($this->allowDestroyNestedAttributes($params)) {
@@ -236,21 +227,27 @@ trait HasNestedAttributes
     /**
      * Save the belongsToMany nested relation attributes to the database.
      *
-     * @param \Illuminate\Database\Eloquent\Model $model
+     * @param BelongsToMany $relation
      * @param array $params
      * @return bool
      */
-    protected function saveBelongsToManyNestedAttributes($model, array $params)
+    protected function saveBelongsToManyNestedAttributes($relation, array $params)
     {
+        $model = $relation->getModel();
         $keyName = $model->getKeyName();
+
+        if ($this->exists && isset($params[$keyName]) && $this->allowDestroyNestedAttributes($params)) {
+            $model = $model->findOrFail($params[$keyName]);
+            return $model->delete();
+        }
 
         $attributes = !empty($params[$keyName]) ? [$keyName => $params[$keyName]] : $params;
 
-        if ($model->nested) {
-            foreach ($model->nested as $nested) {
-                unset($attributes[$nested]);
-            }
-        }
+        $pivotAccessor = $relation->getPivotAccessor();
+        $attributesToRemove = $model->nested ? array_merge($model->nested, [$pivotAccessor]) : [$pivotAccessor];
+        $attributes = Arr::except($attributes, $attributesToRemove);
+
+        unset($params[$pivotAccessor]);
 
         $params = $model::updateOrCreate($attributes, $params);
         return $params->$keyName;
