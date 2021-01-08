@@ -94,7 +94,7 @@ trait HasNestedAttributes
                 }
             } else {
                 if ($relation instanceof HasOne || $relation instanceof MorphOne) {
-                    if (!$this->saveOneNestedAttributes($relation, $stack)) {
+                    if (!$this->saveOneNestedAttributes($this->$methodName(), $stack)) {
                         return false;
                     }
                 } else {
@@ -113,7 +113,7 @@ trait HasNestedAttributes
 //                            $relation->delete();
 //                        }
                         foreach ($stack as $params) {
-                            if (!$this->saveManyNestedAttributes($relation, $params)) {
+                            if (!$this->saveManyNestedAttributes($this->$methodName(), $params)) {
                                 return false;
                             }
                         }
@@ -121,9 +121,9 @@ trait HasNestedAttributes
                         if ($relation instanceof BelongsToMany) {
                             $idsNesteds = [];
                             foreach ($stack as $params) {
-                                $id = $this->saveBelongsToManyNestedAttributes($relation, $params);
+                                $id = $this->saveBelongsToManyNestedAttributes($this->$methodName(), $params);
 
-                                $pivotAccessor = $relation->getPivotAccessor();
+                                $pivotAccessor = $this->$methodName()->getPivotAccessor();
                                 if (!empty($params[$pivotAccessor])) {
                                     $idsNesteds[$id] = $params[$pivotAccessor];
                                 } else {
@@ -131,8 +131,7 @@ trait HasNestedAttributes
                                 }
                             }
 
-                            $relation->sync($idsNesteds);
-
+                            $this->$methodName()->sync($idsNesteds);
                         } else {
                             throw new InvalidArgumentException('The nested attribute relation is not supported for "' . $methodName . '".');
                         }
